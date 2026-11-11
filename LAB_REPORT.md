@@ -192,14 +192,23 @@ ParcelService only knows its field as a ParcelRepository and never mentions H2Pa
 
 1. Identify the files that you changed to move from the store in memory to H2, and explain why no other class had to change. Use the terms of this course.
 
+   I changed Main.java (two lines) and H2ParcelRepository.java (findAll). No other class changed because ParcelService depends on the ParcelRepository interface, not a concrete class (Dependency Inversion Principle), and only Main picks which class to use.
+
 2. The PARCEL table stores the size of a parcel as SMALL, MEDIUM or LARGE rather than as 1, 2 or 3. Identify the type of connascence between ParcelSize and the table in each case, and explain which one is weaker.
+
+   SMALL, MEDIUM, LARGE is connascence of name, while 1, 2, 3 is connascence of convention (both sides must agree 1 means SMALL), or of position if the numbers follow the enum order. Name is weaker, because the value is readable and a wrong name fails loudly, while reordering the enum would silently change what every number means.
 
 3. Project Phase 2 asks for a data store that needs no separate server. Explain why an embedded database such as H2 meets this rule, and describe the limit of an embedded database that Step 0.8 showed.
 
+   H2 runs inside the program as a library and keeps its data in a file, so there is no server to install or start. The limit is that only one program can open it at a time, so in Step 0.8 ParcelPoint could not start while the H2 Shell had the file locked.
+
 4. State the data store that you would choose for your Project Phase 2 team, files or an embedded database, the requirement that drives the choice, and the package that will access it.
+
+   I would choose files, because the requirement is that data stays after the program ends with no separate server, and files do that with no extra library while staying easy to open and check by hand. If the data grows and we need it organised for long-term use, I would move to H2, since querying tables is easier than parsing files. Either way only the storage package would access the data store, behind a repository interface, so the switch would only touch that package and Main.
 
 ## AI usage declaration
 
 | AI tool and exact model | Date | Purpose | Files or answers it produced or changed | How you checked its output |
 | --- | --- | --- | --- | --- |
-| | | | | |
+| Claude Opus 5.5 | 11-12 Nov 2026 | Walked me through Part 0 step by step and explained each step | Git setup commands, the two line change in Main.java, findAll in H2ParcelRepository.java, the break and repair of findByCode in Step 0.13 | I built and ran the program after every change and compared the output with the lab sheet. After findAll, `staff` listed both parcels, and I checked the table in the H2 Shell |
+| Claude Opus 5.5 | 11-12 Nov 2026 | Helped write the report answers and the Part A diagrams | Answers 0.3, 0.5, 0.8, 0.9, 0.13, A1 to A3 and Part B 1 to 4 (4 is my own choice, which it wrote up) | I checked the answers against the code and the error messages I got, matched the package arrows to the import lines, and checked that the diagrams render on GitHub |
