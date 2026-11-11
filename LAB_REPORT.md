@@ -17,7 +17,7 @@ Commit of the starter, before any change: abceff7
 
 0.3 Your prediction for `staff`, written before the second run:
 
-I predicted that `staff` would show no parcels and 3 free lockers, because the program keeps the parcels only while it is running.
+I think `staff` will show nothing and all 3 lockers will be free, because the parcels are only kept while the program is running.
 
 Output of the second run, for `staff` and `quit`:
 
@@ -29,7 +29,7 @@ Free lockers: 3
 
 State in one sentence where you think the parcels of the first run were kept.
 
-The parcels were kept in a Map inside InMemoryParcelRepository, which lives only in the memory of the running program, so it was lost when the program ended.
+They were kept in a Map inside InMemoryParcelRepository, which is only in memory, so they were gone once the program ended.
 
 0.5 The line of Main that you would change to keep the parcels somewhere else:
 
@@ -51,11 +51,11 @@ P1002 | S1002      | LARGE       | STORED | 3
 
 0.8 Explain why ParcelPoint could not start while the H2 Shell was open, and identify the class that wrote the message `Cannot create the PARCEL table`.
 
-H2 is an embedded database, so the program that opens it locks the file parcelpoint.mv.db, and the H2 Shell still held it open. When ParcelPoint started, the constructor of H2ParcelRepository tried to connect in order to create the PARCEL table, and H2 refused with `Database may be already in use` because the file was locked. The message `Cannot create the PARCEL table` was written by H2ParcelRepository, whose constructor catches the SQLException and throws an IllegalStateException with that message, as the stack trace shows at `H2ParcelRepository.<init>`.
+The H2 Shell still had the database open. H2 is embedded, so whichever program opens it first locks parcelpoint.mv.db, and a second program can't get in (the error says `The file is locked`). ParcelPoint tries to connect in the H2ParcelRepository constructor to create the table, so it failed right at startup. The message `Cannot create the PARCEL table` comes from H2ParcelRepository, not from H2. Its constructor catches the SQLException and throws an IllegalStateException with that text, and the stack trace points to `H2ParcelRepository.<init>`.
 
 0.9 Explain why `staff` shows no parcel while `find` shows each one, and why all three lockers look free.
 
-`find` calls findByCode, which runs `SELECT * FROM PARCEL WHERE CODE = ?` and turns the row into a Parcel, so it reads each parcel from H2. `staff` calls findAll, which in the starter only returns `List.of()`, an empty list, and never queries the database, so it shows no parcel. All three lockers look free because the constructor of ParcelService puts every waiting parcel back into its locker from `repository.findAll()`, and that empty list leaves every locker empty when the program starts.
+`find` uses findByCode, which actually runs a SELECT on the PARCEL table, so it finds the parcels. `staff` uses findAll, but in the starter findAll just returns `List.of()` without asking the database, so nothing is listed. The lockers look free for the same reason. When the program starts, the ParcelService constructor calls `findAll()` to put the waiting parcels back into their lockers, and since it gets an empty list, every locker stays empty.
 
 0.11 Your findAll method:
 
@@ -92,6 +92,8 @@ P1002 | S1002      | LARGE       | STORED    | 3
 
 0.13 Optional. Describe what `find P9999'OR'1'='1` showed while the SQL was joined from strings, and what it showed after you put the placeholder back.
 
+With the SQL built from strings, `find P9999'OR'1'='1` printed `P1001, S1001, SMALL, PICKED_UP` even though no parcel has that code. My quotes ended the string early and added `OR '1'='1'`, which is true for every row, so every row came back and findByCode showed the first one. After putting the `?` back, the same input gave `No parcel with code P9999'OR'1'='1`, because H2 now treats the whole input as one value to compare with CODE.
+
 ## Part A. Model the design
 
 A1 Complete the flowchart with one node for each package and one arrow for each dependency, from the package that uses to the package that is used. Mark the package that accesses the data store.
@@ -102,20 +104,58 @@ flowchart TB
     cli
     service
     domain
-    storage
+    storage["storage, accesses the data store"]
+    parcelpoint --> cli
+    parcelpoint --> service
+    parcelpoint --> storage
     cli --> service
+    cli --> domain
+    service --> domain
+    service --> storage
+    storage --> domain
 ```
 
 State whether cli depends on storage, and explain why.
+
+No. ParcelCommandLine only imports from domain and service, never from storage. It gets parcels by calling ParcelService, and only ParcelService talks to the repository. So we can swap the data store without touching cli.
 
 A2 Complete the class diagram of the data management layer with ParcelService, the interface ParcelRepository with its three operations, and the two classes that implement it.
 
 ```mermaid
 classDiagram
-    class ParcelService
+    class ParcelService {
+        -ParcelRepository repository
+        +ParcelService(ParcelRepository repository)
+        +store(Parcel parcel) Optional~Locker~
+        +pickUp(String code, int days) Optional~Double~
+        +find(String code) Optional~Parcel~
+        +allParcels() List~Parcel~
+        +countFreeLockers() long
+    }
     class ParcelRepository {
         <<interface>>
+        +save(Parcel parcel) void
+        +findByCode(String code) Optional~Parcel~
+        +findAll() List~Parcel~
     }
+    class InMemoryParcelRepository {
+        -Map parcels
+        +save(Parcel parcel) void
+        +findByCode(String code) Optional~Parcel~
+        +findAll() List~Parcel~
+    }
+    class H2ParcelRepository {
+        -String url
+        +H2ParcelRepository(String path)
+        +save(Parcel parcel) void
+        +findByCode(String code) Optional~Parcel~
+        +findAll() List~Parcel~
+        -connect() Connection
+        -toParcel(ResultSet row) Parcel
+    }
+    ParcelService "1" --> "1" ParcelRepository : repository
+    ParcelRepository <|.. InMemoryParcelRepository
+    ParcelRepository <|.. H2ParcelRepository
 ```
 
 A3 Draw a sequence diagram for the command `store P1003 S1003 MEDIUM`, from the staff member to the repository. Show each message as an operation of the class that receives it.
@@ -124,10 +164,29 @@ A3 Draw a sequence diagram for the command `store P1003 S1003 MEDIUM`, from the 
 sequenceDiagram
     actor Staff
     participant cli as :ParcelCommandLine
+    participant parcel as :Parcel
+    participant service as :ParcelService
+    participant locker as :Locker
+    participant repository as :ParcelRepository
     Staff->>cli: store P1003 S1003 MEDIUM
+    cli->>parcel: Parcel("P1003", "S1003", MEDIUM)
+    cli->>service: store(parcel)
+    loop for each Locker, until one fits
+        service->>locker: fits(parcel)
+        locker-->>service: true or false
+    end
+    service->>locker: setParcel(parcel)
+    service->>locker: getNumber()
+    locker-->>service: 2
+    service->>parcel: storeIn(2)
+    service->>repository: save(parcel)
+    service-->>cli: Optional of locker 2
+    cli-->>Staff: Parcel P1003 is in locker 2
 ```
 
 Explain why the last lifeline is the interface ParcelRepository rather than H2ParcelRepository.
+
+ParcelService only knows its field as a ParcelRepository and never mentions H2ParcelRepository, so `save` is sent to the interface. Which class is actually behind it is decided in Main. That way the diagram stays correct whether we run with the in-memory store or H2, and it doesn't show a dependency that ParcelService doesn't really have.
 
 ## Part B. Design questions
 
